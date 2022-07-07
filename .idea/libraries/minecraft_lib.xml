@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="minecraft-lib">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/lib/bukkit-1.8.8.jar!/" />
+      <root url="jar://$PROJECT_DIR$/lib/BungeeCord.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

@@ -1,0 +1,4 @@
+name: Hydrus
+version: 1.0.0
+main: gg.hydrus.bukkit.Main
+website: www.hydrus.gg
