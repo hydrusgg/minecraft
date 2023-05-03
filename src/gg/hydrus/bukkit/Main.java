@@ -25,6 +25,8 @@ public class Main extends JavaPlugin {
                     Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
                 });
             });
+
+            Bukkit.getScheduler().runTaskAsynchronously(Main.this, api::work);
         } catch (URISyntaxException e) {
             e.printStackTrace();
         }

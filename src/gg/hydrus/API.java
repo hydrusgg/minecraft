@@ -4,56 +4,108 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import org.java_websocket.client.WebSocketClient;
-import org.java_websocket.handshake.ServerHandshake;
 
-import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.concurrent.CompletableFuture;
 
-public class API extends WebSocketClient {
+public class API {
 
     private final String token;
     private final Dispatcher dispatcher;
+    private boolean invalidCredentials, alive;
     private final JsonParser jsonParser = new JsonParser();
 
-    // Websockets
-    private boolean connected,invalidCredentials,alive;
-
     public API(String token, Dispatcher dispatcher) throws URISyntaxException {
-        super(new URI("wss://rtc.hydrus.gg/"+token+"/plugin"));
-
         this.token = token;
         this.dispatcher = dispatcher;
-        try {
-            this.connect();
+    }
 
-            CompletableFuture.runAsync(() -> {
-                while (alive) {
-                    Utils.sleep(60_000);
-                    if (connected) {
-                        this.sendPing();
-                    }
-                }
-            });
+    private String createSession(int tries) {
+        if (tries < 0) {
+            Utils.println("API#createSession failed 3 times in a row, next try will occur within 5 minutes");
+            Utils.sleep(300_000);
+            return this.createSession(3);
+        }
+
+        HttpRequest request = HttpRequest.post("https://rtc.hydrus.gg/poll");
+        request.header("x-scope", "plugin");
+        request.authorization(this.token).acceptJson();
+        JsonObject body;
+
+        int statusCode;
+
+        try {
+            statusCode = request.code();
+        } catch (Exception exception) {
+            return this.createSession(tries - 1);
+        }
+
+        try {
+            body = this.jsonParser.parse(request.body()).getAsJsonObject();
         } catch (Exception e) {
-            e.printStackTrace();
+            body = new JsonObject();
+        }
+
+        if (statusCode == 403) {
+            this.invalidCredentials = true;
+            Utils.println("'%s'", this.token);
+            Utils.println("Invalid credentials: %s", body.get("message").getAsString());
+            return null;
+        }
+        if (statusCode != 200) {
+            Utils.println("Unexpected HTTP Status: %d", statusCode);
+            return createSession(tries - 1);
+        }
+
+        JsonObject store = body.getAsJsonObject("store");
+        Utils.println("Connected as %s [%s]", store.get("domain").getAsString(), store.get("name").getAsString());
+
+        JsonArray messages = body.getAsJsonArray("messages");
+        handleMessages(messages);
+
+        return body.get("token").getAsString();
+    }
+
+    public void work() {
+        String sessionId = this.createSession(3);
+
+        this.alive = !invalidCredentials;
+
+        while (alive) {
+            try {
+                HttpRequest request = HttpRequest.get("https://rtc.hydrus.gg/poll");
+                request.header("x-session-id", sessionId);
+
+                if (request.code() == 410) {
+                    Utils.println("Disconnected (410)");
+                    sessionId = createSession(3);
+                } else if (request.code() == 200) {
+                    JsonObject body;
+                    try {
+                        body = this.jsonParser.parse(request.body()).getAsJsonObject();
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    handleMessages(body.getAsJsonArray("messages"));
+                }
+            } catch (HttpRequest.HttpRequestException exception) {
+                Utils.println("An IO error occurred, sleeping for 30 seconds: %s", exception.getMessage());
+                Utils.sleep(30_000);
+                sessionId = this.createSession(3);
+            }
         }
     }
 
     public void kill() {
-        this.close();
         alive = false;
     }
 
-    private void onHandshake(JsonObject payload) {
-        if (payload.has("error")) {
-            Utils.println("Unable to connect to the RTC: "+payload.get("error").getAsString());
-            this.invalidCredentials = true;
-        } else {
-            this.connected = true;
-            Utils.println("Connected to the RTC");
-        }
+    private void handleMessages(JsonArray messages) {
+        messages.forEach(element ->
+            CompletableFuture.runAsync(() ->
+                onMessage(element.getAsString())
+            )
+        );
     }
 
     private void onExecuteCommand(JsonObject payload) {
@@ -67,72 +119,34 @@ public class API extends WebSocketClient {
             final HttpRequest req = new HttpRequest(url, "POST");
             req.header("X-HTTP-Method-Override", "PATCH");
             req.authorization("Bearer "+this.token);
-            req.userAgent("Hydrus/MinecraftPlugin");
             req.contentType("application/json");
 
             try {
                 req.send(body);
             } catch (Exception exception) {
-                Utils.println("Failed to update command #"+id+", error: "+exception.getMessage());
+                Utils.println("Failed to update command #%d, error: %s", id, exception.getMessage());
                 continue;
             }
 
             if (req.ok()) {
                 break;
             } else {
-                Utils.println("Failed to update command #"+id+", http status: "+req.code()+" (trying again in 10 seconds)");
+                Utils.println("Failed to update command #%d, http status: %d (trying again in 10 seconds)", id, req.code());
                 Utils.sleep(10_000);
             }
         }
     }
 
-    private void onExecuteCommands(JsonArray payload) {
-        payload.forEach(it -> this.onExecuteCommand(it.getAsJsonObject()));
-    }
-
-    @Override
-    public void onOpen(ServerHandshake serverHandshake) {}
-
-    @Override
     public void onMessage(String raw) {
-        final JsonObject parsed = this.jsonParser.parse(raw).getAsJsonObject();
+        final JsonObject object = this.jsonParser.parse(raw).getAsJsonObject();
 
-        final String event = parsed.get("event").getAsString();
-        final JsonElement payload = parsed.get("payload");
+        final String event = object.get("event").getAsString();
+        final JsonElement payload = object.get("payload");
 
         switch (event) {
-            case "HANDSHAKE": this.onHandshake(payload.getAsJsonObject()); break;
             case "EXECUTE_COMMAND": this.onExecuteCommand(payload.getAsJsonObject()); break;
-            case "EXECUTE_COMMANDS": this.onExecuteCommands(payload.getAsJsonArray()); break;
             default: Utils.println("Unsupported event type: " + event);
         }
     }
 
-    @Override
-    public void onClose(int i, String s, boolean b) {
-        if (!this.invalidCredentials) {
-            if (this.connected) {
-                Utils.println("Connection dropped, trying again in 5 seconds");
-            } else {
-                Utils.println("Failed to connect, trying again in 5 seconds");
-            }
-            CompletableFuture.runAsync(() -> {
-                Utils.sleep(5000);
-                this.reconnect();
-            });
-        }
-        this.connected = false;
-    }
-
-    @Override
-    public void onError(Exception e) {
-        e.printStackTrace();
-        if (!connected && !invalidCredentials) {
-            Utils.println("Failed to connect for the first time, trying again in 5 seconds");
-            CompletableFuture.runAsync(() -> {
-                Utils.sleep(5000);
-                this.reconnect();
-            });
-        }
-    }
 }

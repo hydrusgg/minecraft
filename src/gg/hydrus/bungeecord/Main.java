@@ -44,13 +44,15 @@ public class Main extends Plugin {
 
     @Override
     public void onEnable() {
+        final BungeeCord bungee = BungeeCord.getInstance();
         final String token = this.config.getString("token");
 
         try {
             this.api = new API(token, command -> {
-                final BungeeCord bungee = BungeeCord.getInstance();
                 bungee.pluginManager.dispatchCommand(bungee.getConsole(), command);
             });
+
+            bungee.getScheduler().runAsync(this, api::work);
         } catch (URISyntaxException e) {
             e.printStackTrace();
         }

@@ -11,7 +11,7 @@ public class Utils {
         }
     }
 
-    public static void println(String string) {
-        System.out.println("[Hydrus] "+string);
+    public static void println(String template, Object ...args) {
+        System.out.println("[Hydrus] "+String.format(template, args));
     }
 }
