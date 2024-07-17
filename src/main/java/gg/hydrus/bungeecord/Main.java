@@ -1,7 +1,7 @@
 package gg.hydrus.bungeecord;
 
 import gg.hydrus.API;
-import net.md_5.bungee.BungeeCord;
+import net.md_5.bungee.api.ProxyServer;
 import net.md_5.bungee.api.plugin.Plugin;
 import net.md_5.bungee.config.Configuration;
 import net.md_5.bungee.config.ConfigurationProvider;
@@ -44,15 +44,15 @@ public class Main extends Plugin {
 
     @Override
     public void onEnable() {
-        final BungeeCord bungee = BungeeCord.getInstance();
+        final ProxyServer bungee = this.getProxy();
         final String token = this.config.getString("token");
 
         try {
             this.api = new API(token, command -> {
-                bungee.pluginManager.dispatchCommand(bungee.getConsole(), command);
+                bungee.getPluginManager().dispatchCommand(bungee.getConsole(), command);
             });
 
-            bungee.getScheduler().runAsync(this, api::work);
+            bungee.getScheduler().runAsync(this, api::boot);
         } catch (URISyntaxException e) {
             e.printStackTrace();
         }

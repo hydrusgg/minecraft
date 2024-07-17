@@ -26,7 +26,7 @@ public class Main extends JavaPlugin {
                 });
             });
 
-            Bukkit.getScheduler().runTaskAsynchronously(Main.this, api::work);
+            Bukkit.getScheduler().runTaskAsynchronously(Main.this, api::boot);
         } catch (URISyntaxException e) {
             e.printStackTrace();
         }
